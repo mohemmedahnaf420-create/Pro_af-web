@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pro AE Web Editor - Keyframes</title>
+<style>
+body{margin:0;font-family:Arial;background:#121212;color:white;display:flex;flex-direction:column;min-height:100vh;}
+header{background:#1e1e1e;padding:10px;text-align:center;color:#FFD700;font-weight:bold;}
+.container{display:flex;flex:1;flex-wrap:wrap;}
+#sidebar{width:260px;background:#1e1e1e;padding:10px;display:flex;flex-direction:column;min-width:220px;}
+#sidebar h2{text-align:center;color:#FFD700;margin:10px 0;}
+#sidebar button{margin:5px 0;padding:8px;border:none;border-radius:5px;cursor:pointer;background:#FF4500;color:white;font-weight:bold;}
+#sidebar button:hover{background:#FF6347;}
+#main{flex:1;display:flex;flex-direction:column;align-items:center;padding:10px;min-width:300px;}
+#videoContainer{border:3px solid #FFD700;border-radius:10px;width:100%;max-height:40vh;position:relative;background:black;overflow:hidden;}
+#videoPreview{width:100%;max-height:40vh;display:block;}
+.draggable{position:absolute;cursor:grab;font-weight:bold;color:white;text-shadow:2px 2px 5px black; touch-action:none;}
+#timeline{margin-top:10px;width:100%;height:160px;background:#222;border-radius:10px;display:flex;flex-direction:row;padding:5px;overflow-x:auto;}
+.layer{flex:0 0 auto;margin:2px;background:#333;border-radius:5px;position:relative;min-width:150px;height:25px;}
+.layer span{position:absolute;top:2px;left:5px;font-size:12px;color:white;}
+.keyframe{width:8px;height:8px;background:#FFD700;position:absolute;border-radius:50%;top:50%;transform:translateY(-50%);}
+input[type=range]{width:90%;margin:3px 0;}
+@media(max-width:600px){.container{flex-direction:column;}.draggable{font-size:14px;}}
+</style>
+</head>
+<body>
+
+<header>Pro AE Web Editor - Keyframes</header>
+
+<div class="container">
+<div id="sidebar">
+<h2>Tools</h2>
+<input type="file" id="uploadVideo" multiple><br>
+<button onclick="playVideo()">▶ Play</button>
+<button onclick="pauseVideo()">⏸ Pause</button>
+<hr>
+<button onclick="addText()">📝 Text</button>
+<button onclick="addSticker()">🖼️ Sticker</button>
+<hr>
+<h3>Effects</h3>
+<button onclick="setEffect('none')">Clear</button>
+<button onclick="setEffect('grayscale(1)')">Grayscale</button>
+<button onclick="setEffect('brightness(150%)')">Brightness</button>
+<button onclick="setEffect('contrast(150%)')">Contrast</button>
+<button onclick="setEffect('saturate(200%)')">Saturation</button>
+<button onclick="setEffect('blur(5px)')">Blur</button>
+<button onclick="setEffect('drop-shadow(0 0 10px #FFD700)')">Glow</button>
+<hr>
+<h3>Transform</h3>
+X: <input type="range" id="posX" min="0" max="1000" value="100" oninput="updateTransform()"><br>
+Y: <input type="range" id="posY" min="0" max="1000" value="100" oninput="updateTransform()"><br>
+Scale: <input type="range" id="scale" min="0.1" max="3" step="0.1" value="1" oninput="updateTransform()"><br>
+Rotation: <input type="range" id="rotation" min="0" max="360" value="0" oninput="updateTransform()"><br>
+Opacity: <input type="range" id="opacity" min="0" max="1" step="0.01" value="1" oninput="updateTransform()"><br>
+<hr>
+<input type="file" id="music" accept="audio/*"><br>
+<button onclick="playMusic()">▶ Music</button>
+<button onclick="pauseMusic()">⏸ Music</button>
+<hr>
+<button onclick="exportMergedVideo()">📤 Export</button>
+</div>
+
+<div id="main">
+<div id="videoContainer">
+<video id="videoPreview" controls></video>
+</div>
+<div id="timeline"></div>
+</div>
+</div>
+
+<script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.8/dist/ffmpeg.min.js"></script>
+<script>
+const { createFFmpeg, fetchFile } = FFmpeg;
+const ffmpeg = createFFmpeg({ log:true });
+
+let videoFiles=[], videoPreview=document.getElementById("videoPreview");
+let uploadInput=document.getElementById("uploadVideo");
+let musicInput=document.getElementById("music"), audio=new Audio();
+let textElements=[], stickerElements=[], activeEl=null;
+let keyframes={}; // Store keyframes per layer
+
+// Upload video
+uploadInput.onchange=()=>{
+    videoFiles=Array.from(uploadInput.files);
+    if(videoFiles.length>0){
+        videoPreview.src=URL.createObjectURL(videoFiles[0]);
+        videoPreview.load();
+    }
+    updateTimeline();
+}
+
+// Timeline with keyframes
+function updateTimeline(){
+    let timeline=document.getElementById("timeline");
+    timeline.innerHTML="";
+    videoFiles.forEach((v,i)=>{
+        let div=document.createElement("div");
+        div.className="layer";
+        div.innerHTML="<span>Video "+(i+1)+"</span>";
+        timeline.appendChild(div);
+        keyframes["video"+i]=[];
+    });
+}
+
+// Video controls
+function playVideo(){ videoPreview.play(); }
+function pauseVideo(){ videoPreview.pause(); }
+
+// Music controls
+musicInput.onchange=()=>{ audio.src=URL.createObjectURL(musicInput.files[0]); }
+function playMusic(){ audio.play(); }
+function pauseMusic(){ audio.pause(); }
+
+// Effects
+function setEffect(val){ if(activeEl) activeEl.style.filter=val; else videoPreview.style.filter=val; }
+
+// Add Text
+function addText(){
+    let txt=prompt("Enter text:"); if(!txt) return;
+    let div=document.createElement("div"); div.innerText=txt; div.className="draggable"; div.style.top="100px"; div.style.left="100px";
+    document.getElementById("videoContainer").appendChild(div);
+    enableDrag(div); activeEl=div; textElements.push(div);
+    keyframes[div]=[];
+}
+
+// Add Sticker
+function addSticker(){
+    let url=prompt("Enter sticker URL"); if(!url) return;
+    let img=document.createElement("img"); img.src=url; img.className="draggable"; img.style.top="150px"; img.style.left="150px"; img.style.width="100px";
+    document.getElementById("videoContainer").appendChild(img);
+    enableDrag(img); activeEl=img; stickerElements.push(img);
+    keyframes[img]=[];
+}
+
+// Drag + Touch
+function enableDrag(el){
+    let pos1=0,pos2=0,pos3=0,pos4=0;
+    const start=(clientX,clientY)=>{ pos3=clientX; pos4=clientY; activeEl=el; }
+    const move=(clientX,clientY)=>{
+        pos1=pos3-clientX; pos2=pos4-clientY;
+        pos3=clientX; pos4=clientY;
+        el.style.left=(el.offsetLeft-pos1)+"px"; el.style.top=(el.offsetTop-pos2)+"px";
+        // Store keyframe
+        keyframes[el].push({time:videoPreview.currentTime, left:el.offsetLeft, top:el.offsetTop});
+    }
+    el.addEventListener('mousedown',e=>{
+        e.preventDefault(); start(e.clientX,e.clientY);
+        const m=(ev)=>{ ev.preventDefault(); move(ev.clientX,ev.clientY); }
+        const u=()=>{ document.removeEventListener('mousemove',m); document.removeEventListener('mouseup',u); }
+        document.addEventListener('mousemove',m); document.addEventListener('mouseup',u);
+    });
+    el.addEventListener('touchstart',e=>{ start(e.touches[0].clientX,e.touches[0].clientY); });
+    el.addEventListener('touchmove',e=>{ e.preventDefault(); move(e.touches[0].clientX,e.touches[0].clientY); });
+}
+
+// Transform sliders
+function updateTransform(){
+    if(!activeEl) return;
+    let x=document.getElementById("posX").value;
+    let y=document.getElementById("posY").value;
+    let s=document.getElementById("scale").value;
+    let r=document.getElementById("rotation").value;
+    let o=document.getElementById("opacity").value;
+    activeEl.style.left=x+"px"; activeEl.style.top=y+"px";
+    activeEl.style.transform=`scale(${s}) rotate(${r}deg)`;
+    activeEl.style.opacity=o;
+    keyframes[activeEl].push({time:videoPreview.currentTime,left:x,top:y,scale:s,rotation:r,opacity:o});
+}
+
+// Export (simplified multi-layer first video only)
+async function exportMergedVideo(){
+    if(videoFiles.length==0){ alert("Upload videos first!"); return; }
+    document.body.style.cursor="wait"; if(!ffmpeg.isLoaded()) await ffmpeg.load();
+    for(let i=0;i<videoFiles.length;i++){ ffmpeg.FS('writeFile','video'+i+'.mp4',await fetchFile(videoFiles[i])); }
+    await ffmpeg.run('-i','video0.mp4','output.mp4');
+    const data=ffmpeg.FS('readFile','output.mp4');
+    const url=URL.createObjectURL(new Blob([data.buffer],{type:'video/mp4'}));
+    const a=document.createElement('a'); a.href=url; a.download="AE_pro_web_keyframes.mp4"; a.click();
+    document.body.style.cursor="default"; alert("Export completed!");
+}
+</script>
+</body>
+</html>
